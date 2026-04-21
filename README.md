@@ -1,110 +1,146 @@
 # OptiYOLO
 
-基于教师热力图引导的轻量化 YOLO 检测训练工程。  
-当前代码已按模块拆分，入口脚本为 `train_teacher.py`。
+基于教师热力图引导的轻量化 YOLO 检测训练工程。
+当前训练入口为 `train_teacher.py`。
 
-## 目录说明
+## 1. 项目特点
 
-- `train_teacher.py`: 训练入口
-- `teacher_training/config.py`: 训练配置
-- `teacher_training/models.py`: 教师网络与检测头
-- `teacher_training/data.py`: 数据集与数据增强
-- `teacher_training/losses.py`: 检测损失与目标构建
-- `teacher_training/metrics.py`: 评估指标（支持无 COCO 依赖回退）
-- `teacher_training/visualization.py`: OpenCV 可视化
-- `teacher_training/trainer.py`: 主训练流程
+- 双阶段训练流程：先训练教师网络，再训练检测头
+- 检测头采用 anchor-based 多尺度输出结构
+- 支持 AMP、EMA、Warmup、梯度累计与 Mixup
+- 自动输出权重、日志、指标曲线和可视化结果
 
-## 环境要求
 
-- Python 3.10+（已在 3.12 环境使用）
-- PyTorch / TorchVision
-- 其他依赖：
-  - `numpy`
-  - `opencv-python`
-  - `pandas`
-  - `matplotlib`
-  - `tqdm`
-  - `pyyaml`
-  - `torchmetrics`
-  - `tensorboardX`（推荐，用于 TensorBoard）
+## 2. 目录结构
 
-可选（用于 `torchmetrics` 官方 COCO mAP 实现）：
-- `pycocotools` 或 `faster-coco-eval`
+- `train_teacher.py`：训练入口
+- `teacher_training/config.py`：训练参数定义与校验
+- `teacher_training/cli.py`：命令行参数解析
+- `teacher_training/models.py`：`ConvTeacher` 与 `YOLOLightHead`
+- `teacher_training/data.py`：数据集、增强、letterbox、collate
+- `teacher_training/losses.py`：YOLO 损失与目标分配
+- `teacher_training/metrics.py`：预测解码与评估指标
+- `teacher_training/trainer.py`：完整训练主流程
+- `teacher_training/visualization.py`：验证阶段可视化
 
-## 安装示例
+---
 
-```bash
-pip install torch torchvision
-pip install numpy opencv-python pandas matplotlib tqdm pyyaml torchmetrics tensorboardX
-```
+## 3. 环境安装
 
-或使用依赖文件：
+### 3.1 基础依赖
+
+- Python 3.10+，已在 3.12 环境验证
+- PyTorch / TorchVision，请按 CUDA 版本安装
+- `tensorboardX`，用于训练日志可视化
+
+### 3.2 安装方式
 
 ```bash
 pip install -r requirements.txt
 ```
 
-可选：
+---
 
-```bash
-pip install pycocotools
+## 4. 数据集格式
+
+项目默认读取 `--yaml` 指定的 YOLO 数据集配置，默认路径为 `yolov5/data/coco128.yaml`。
+
+- 标注格式：`class cx cy w h`
+- 坐标要求：归一化到 `[0, 1]`
+- 图片与标签目录会根据 yaml 自动解析
+
+常见目录形态：
+
+```text
+dataset_root/
+  train/
+    images/*.jpg
+    labels/*.txt
+  val/
+    images/*.jpg
+    labels/*.txt
 ```
 
-## 数据配置
+---
 
-默认从 `yolov5/data/coco128.yaml` 读取类别与数据路径。  
-代码会自动解析 `train/val images` 目录并推断对应 `labels` 目录。
-
-请确认你的标注为 YOLO txt 格式：  
-`class cx cy w h`（归一化坐标）。
-
-## 快速开始
+## 5. 5 分钟快速开始
 
 ```bash
-# 1) 安装依赖（先安装匹配你环境的 torch/torchvision）
+# 1) 安装依赖
 pip install -r requirements.txt
 
-# 2) 直接训练（使用默认配置）
+# 2) 开始训练，使用默认配置
 python train_teacher.py
 ```
 
-## 训练
-
-```bash
-python train_teacher.py
-
-# 可选参数示例
-python train_teacher.py --yaml yolov5/data/coco128.yaml --batch-size 8 --teacher-epochs 200 --detector-epochs 300
-```
-
-## CLI 参数
-
-可通过命令行覆盖 `TrainConfig` 的关键字段：
-
-- `--yaml`: 数据集 yaml 路径
-- `--img-size`: 输入尺寸（默认 640）
-- `--batch-size`: 批大小
-- `--teacher-epochs`: 教师网络训练轮数
-- `--detector-epochs`: 检测头训练轮数
-- `--eval-interval`: 每 N 轮评估一次
-- `--vis-interval`: 每 N 轮导出可视化
-- `--experiment-name`: 实验名（影响输出目录）
-- `--base-save`: 输出根目录
-- `--teacher-weight-path`: 教师权重路径（相对路径会放入 `shared/`）
-- `--num-workers`: DataLoader worker 数
-- `--seed`: 随机种子
-- `--device`: 强制设备（如 `cuda` / `cpu`）
-- `--disable-tensorboard`: 关闭 TensorBoard 日志
-
-查看全部参数：
+查看所有参数：
 
 ```bash
 python train_teacher.py --help
 ```
 
-## 输出结构
+---
 
-默认输出到 `outputs/teacher_detector/`，每次运行创建独立目录：
+## 6. 训练流程
+
+1. 解析配置并创建输出目录  
+2. 训练教师网络。如果 `teacher_weight_path` 已存在，则跳过此阶段。  
+3. 冻结教师网络，训练检测头  
+4. 按 `eval_interval` 评估并保存最佳权重  
+5. 按 `vis_interval` 导出可视化  
+6. 训练结束保存 `final_det.pth`、曲线和日志
+
+---
+
+## 7. 常用训练命令
+
+### 7.1 默认训练
+
+```bash
+python train_teacher.py
+```
+
+### 7.2 提升稳定性
+
+```bash
+python train_teacher.py \
+  --yaml yolov5/data/coco128.yaml \
+  --batch-size 8 \
+  --detector-epochs 300 \
+  --warmup-epochs 3 \
+  --accumulate 2
+```
+
+### 7.3 快速调参
+
+```bash
+python train_teacher.py \
+  --mixup-prob 0.2 \
+  --cls-label-smoothing 0.02 \
+  --eval-conf-thre 0.001 \
+  --vis-conf-thre 0.25
+```
+
+---
+
+## 8. 关键参数说明
+
+- `--detector-lr`：检测头学习率，过小易欠拟合，过大易震荡
+- `--warmup-epochs` / `--warmup-start-factor`：前期学习率预热
+- `--accumulate`：梯度累计，等效增大 batch
+- `--disable-amp`：关闭混合精度，默认开启
+- `--disable-ema` / `--ema-decay` / `--ema-tau`：EMA 相关
+- `--mixup-prob` / `--mixup-alpha`：Mixup 强度
+- `--anchor-match-ratio-thresh`：目标与锚框匹配松紧度
+- `--disable-neighbor-cells`：关闭邻格分配，匹配规则更严格
+- `--eval-conf-thre`：验证解码阈值，建议使用较低取值以减少漏检
+- `--vis-conf-thre`：可视化解码阈值，建议使用中等取值
+
+---
+
+## 9. 输出文件说明
+
+默认输出目录：`outputs/teacher_detector/`
 
 ```text
 outputs/teacher_detector/
@@ -114,6 +150,7 @@ outputs/teacher_detector/
     weights/
       best_det.pth
       final_det.pth
+      ema_det.pth
     logs/
       results.csv
       tensorboard/
@@ -124,61 +161,19 @@ outputs/teacher_detector/
       final_visual.png
 ```
 
-## 指标说明
+重点查看：
 
-- 主优化指标：`mAP@0.5:0.95`
-- 同时记录：`mAP@0.5`、`Precision`、`Recall`、`F1`
-- 早停策略：`mAP@0.5:0.95` 与 `F1` 双指标联合判断，降低单指标抖动影响
-- 验证集可视化会在 GT 与预测框之外，额外叠加各尺度最佳匹配锚框（`A@8 / A@16 / A@32`）。
+- `logs/results.csv`：每轮损失与指标
+- `plots/all_metrics.png`：趋势是否收敛
+- `weights/best_det.pth`：主评估指标最优权重
 
-## TensorBoard
+---
 
-安装 `tensorboardX` 后自动记录训练与评估标量。
+## 10. 指标解读建议
 
-```bash
-tensorboard --logdir outputs/teacher_detector
-```
+- 主指标：`mAP@0.5:0.95`
+- 辅助指标：`mAP@0.5`、`Precision`、`Recall`、`F1`
+- 若 `mAP@0.5` 高而 `mAP@0.5:0.95` 低：定位精度不足
+- 若 `Precision` 高而 `Recall` 低：漏检偏多。可尝试降低阈值并增强数据。
 
-## 常用配置项
-
-可在 `teacher_training/config.py` 中修改：
-
-- `img_size`
-- `batch_size`
-- `teacher_epochs`
-- `detector_epochs`
-- `base_save`
-- `experiment_name`
-- `enable_tensorboard`
-- `detector_patience`
-- `detector_min_delta_map5095`
-- `detector_min_delta_f1`
-- `seed`
-- `num_workers`
-- `teacher_lr` / `detector_lr`
-- `heat_loss_weight` / `feat_loss_weight` / `bce_loss_weight`
-- `device_override`（可通过 `--device` 覆盖）
-- `grad_clip_norm`
-- `teacher_weight_decay` / `detector_weight_decay`
-
-## 复现实验建议
-
-- 固定 `seed`，并保持数据集与 yaml 不变。
-- 每次实验使用不同 `experiment_name`，避免结果相互覆盖。
-- 关注 `logs/results.csv` 与 `plots/all_metrics.png` 的一致性。
-- 通过 `shared/teacher_best.pth` 复用教师权重，减少重复训练开销。
-
-## 常见问题
-
-- `ModuleNotFoundError: No module named 'torch'`
-  - 先按 [PyTorch 官方安装指南](https://pytorch.org/get-started/locally/) 安装 `torch` 和 `torchvision`。
-- `torchmetrics` mAP 依赖缺失
-  - 可安装 `pycocotools` 或 `faster-coco-eval`，否则会自动回退到内置 mAP 计算。
-
-## 工程化改进（本版本）
-
-- 训练入口支持 CLI 参数，便于脚本化和实验管理。
-- 训练配置增加校验逻辑，避免无效参数在训练中途才报错。
-- 输出目录、随机种子、训练状态管理已解耦，`trainer.py` 可维护性更高。
-- DataLoader 参数（`num_workers`、`pin_memory`）统一由配置控制。
-
+---

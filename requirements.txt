@@ -1,0 +1,17 @@
+numpy
+opencv-python
+pandas
+matplotlib
+tqdm
+pyyaml
+torchmetrics
+tensorboardX
+faster-coco-eval
+
+# Install PyTorch according to your CUDA/CPU environment:
+# https://pytorch.org/get-started/locally/
+# torch
+# torchvision
+
+# Optional COCO backend for torchmetrics detection mAP:
+# pycocotools

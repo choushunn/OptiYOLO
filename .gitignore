@@ -1,0 +1,47 @@
+# Python cache / build
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+yolov5/
+# Virtual env
+.venv/
+venv/
+env/
+docs/
+outputs/
+# IDE / local workspace
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.trae/
+
+# Training artifacts
+outputs/
+runs/
+logs/
+*.log
+
+# Model checkpoints / export files
+*.pth
+*.pt
+*.onnx
+*.engine
+
+# Large data / local experiment files
+*.zip
+*.tar
+*.tar.gz
+*.7z
+

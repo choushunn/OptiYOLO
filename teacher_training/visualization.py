@@ -96,6 +96,7 @@ def visualize_with_opencv(
     save_path: str = "teacher_feature_visualization.png",
     num_samples: int = 2,
     iou_threshold: float = 0.5,
+    conf_thre: float = 0.25,
 ) -> None:
     """
     使用 OpenCV 可视化结果
@@ -130,7 +131,7 @@ def visualize_with_opencv(
                 anchors,
                 num_classes,
                 device,
-                conf_thre=0.3,
+                conf_thre=conf_thre,
                 nms_thre=0.45,
             )
 

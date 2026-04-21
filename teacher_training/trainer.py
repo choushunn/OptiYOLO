@@ -1,5 +1,6 @@
 import copy
 import math
+import random
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
@@ -363,6 +364,25 @@ def _compute_aux_losses(
     return heat_loss, feat_loss, bce_loss
 
 
+def _mixup_batch(imgs: torch.Tensor, targets, prob: float, alpha: float):
+    if prob <= 0 or random.random() >= prob or imgs.shape[0] < 2:
+        return imgs, targets
+    lam = float(torch.distributions.Beta(alpha, alpha).sample().item())
+    perm = torch.randperm(imgs.shape[0], device=imgs.device)
+    mixed_imgs = imgs * lam + imgs[perm] * (1.0 - lam)
+    mixed_targets = []
+    for i in range(len(targets)):
+        t1 = targets[i]
+        t2 = targets[int(perm[i].item())]
+        if len(t1) == 0:
+            mixed_targets.append(t2.clone())
+        elif len(t2) == 0:
+            mixed_targets.append(t1.clone())
+        else:
+            mixed_targets.append(torch.cat([t1, t2], dim=0))
+    return mixed_imgs, mixed_targets
+
+
 def _evaluate_and_update_state(
     cfg: TrainConfig,
     state: DetectorTrainState,
@@ -406,7 +426,7 @@ def _evaluate_and_update_state(
         cfg.strides,
         cfg.anchors,
         iou_threshold=0.5,
-        conf_thre=0.3,
+        conf_thre=cfg.eval_conf_thre,
         allow_metric_fallback=cfg.allow_metric_fallback,
     )
     state.last_map = metrics["map_50"].item()
@@ -491,7 +511,15 @@ def run_training(cfg: TrainConfig = None) -> None:
 
     detector = YOLOLightHead(in_channels=1, out_channels=3 * (5 + num_classes)).to(cfg.device)
     optimizer = optim.Adam(detector.parameters(), lr=cfg.detector_lr, weight_decay=cfg.detector_weight_decay)
-    criterion = YOLOLoss(cfg.strides, cfg.anchors, num_classes, cfg.box_weight, cfg.obj_weight, cfg.cls_weight)
+    criterion = YOLOLoss(
+        cfg.strides,
+        cfg.anchors,
+        num_classes,
+        cfg.box_weight,
+        cfg.obj_weight,
+        cfg.cls_weight,
+        label_smoothing=cfg.cls_label_smoothing,
+    )
     scheduler = ReduceLROnPlateau(optimizer, "max", factor=0.5, patience=5, min_lr=1e-6)
     use_amp = cfg.amp and cfg.device.startswith("cuda")
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
@@ -517,6 +545,7 @@ def run_training(cfg: TrainConfig = None) -> None:
             imgs, targets = zip(*batch)
             imgs = torch.stack(imgs).to(cfg.device)
             targets = [t.to(cfg.device) for t in targets]
+            imgs, targets = _mixup_batch(imgs, targets, cfg.mixup_prob, cfg.mixup_alpha)
             with torch.no_grad():
                 heatmap = teacher(imgs)
 
@@ -613,6 +642,7 @@ def run_training(cfg: TrainConfig = None) -> None:
                 cfg.anchors,
                 num_classes,
                 save_path=str(dirs.visuals_dir / f"vis_ep{epoch + 1}.png"),
+                conf_thre=cfg.vis_conf_thre,
             )
 
     torch.save(detector.state_dict(), dirs.weights_dir / "final_det.pth")
@@ -628,6 +658,7 @@ def run_training(cfg: TrainConfig = None) -> None:
         cfg.anchors,
         num_classes,
         save_path=str(dirs.visuals_dir / "final_visual.png"),
+        conf_thre=cfg.vis_conf_thre,
     )
     _plot_metrics(csv_path, dirs.plots_dir)
 

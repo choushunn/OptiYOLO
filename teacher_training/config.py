@@ -20,6 +20,7 @@ class TrainConfig:
     box_weight: float = 5.0
     obj_weight: float = 1.2
     cls_weight: float = 1.8
+    cls_label_smoothing: float = 0.02
     heat_loss_weight: float = 0.7
     feat_loss_weight: float = 0.4
     bce_loss_weight: float = 0.05
@@ -43,11 +44,15 @@ class TrainConfig:
     use_ema: bool = True
     ema_decay: float = 0.9998
     ema_tau: float = 2000.0
+    eval_conf_thre: float = 0.001
+    vis_conf_thre: float = 0.25
+    mixup_prob: float = 0.15
+    mixup_alpha: float = 8.0
 
     # Optimizer setup
     teacher_lr: float = 8e-5
     teacher_weight_decay: float = 1e-5
-    detector_lr: float = 2.2e-5
+    detector_lr: float = 2e-4
     detector_weight_decay: float = 5e-5
 
     # YOLO head setup
@@ -112,10 +117,20 @@ class TrainConfig:
             raise ValueError("warmup_start_factor must be in [0, 1]")
         if self.accumulate <= 0:
             raise ValueError("accumulate must be positive")
+        if not (0.0 <= self.cls_label_smoothing < 1.0):
+            raise ValueError("cls_label_smoothing must be in [0, 1)")
         if not (0.0 < self.ema_decay < 1.0):
             raise ValueError("ema_decay must be in (0, 1)")
         if self.ema_tau <= 0:
             raise ValueError("ema_tau must be positive")
+        if not (0.0 <= self.eval_conf_thre <= 1.0):
+            raise ValueError("eval_conf_thre must be in [0, 1]")
+        if not (0.0 <= self.vis_conf_thre <= 1.0):
+            raise ValueError("vis_conf_thre must be in [0, 1]")
+        if not (0.0 <= self.mixup_prob <= 1.0):
+            raise ValueError("mixup_prob must be in [0, 1]")
+        if self.mixup_alpha <= 0:
+            raise ValueError("mixup_alpha must be positive")
         if self.anchor_match_ratio_thresh <= 1.0:
             raise ValueError("anchor_match_ratio_thresh must be > 1.0")
         if self.cudnn_benchmark and self.deterministic:

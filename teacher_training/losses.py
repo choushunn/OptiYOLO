@@ -15,6 +15,7 @@ class YOLOLoss(nn.Module):
         box_weight: float,
         obj_weight: float,
         cls_weight: float,
+        label_smoothing: float = 0.0,
     ):
         """
         初始化 YOLO 损失函数
@@ -34,7 +35,35 @@ class YOLOLoss(nn.Module):
         self.box_weight = box_weight
         self.obj_weight = obj_weight
         self.cls_weight = cls_weight
+        self.label_smoothing = label_smoothing
         self.bce = nn.BCEWithLogitsLoss()
+
+    @staticmethod
+    def _bbox_iou_xywh(pred_boxes: torch.Tensor, target_boxes: torch.Tensor) -> torch.Tensor:
+        pred_cx, pred_cy, pred_w, pred_h = pred_boxes[:, 0], pred_boxes[:, 1], pred_boxes[:, 2], pred_boxes[:, 3]
+        target_cx, target_cy, target_w, target_h = (
+            target_boxes[:, 0],
+            target_boxes[:, 1],
+            target_boxes[:, 2],
+            target_boxes[:, 3],
+        )
+        pred_x1 = pred_cx - pred_w / 2
+        pred_y1 = pred_cy - pred_h / 2
+        pred_x2 = pred_cx + pred_w / 2
+        pred_y2 = pred_cy + pred_h / 2
+        target_x1 = target_cx - target_w / 2
+        target_y1 = target_cy - target_h / 2
+        target_x2 = target_cx + target_w / 2
+        target_y2 = target_cy + target_h / 2
+        inter_x1 = torch.max(pred_x1, target_x1)
+        inter_y1 = torch.max(pred_y1, target_y1)
+        inter_x2 = torch.min(pred_x2, target_x2)
+        inter_y2 = torch.min(pred_y2, target_y2)
+        inter_area = torch.clamp(inter_x2 - inter_x1, min=0) * torch.clamp(inter_y2 - inter_y1, min=0)
+        pred_area = pred_w * pred_h
+        target_area = target_w * target_h
+        union_area = pred_area + target_area - inter_area + 1e-7
+        return inter_area / union_area
 
     def ciou_loss(self, pred_boxes: torch.Tensor, target_boxes: torch.Tensor) -> torch.Tensor:
         """
@@ -127,20 +156,26 @@ class YOLOLoss(nn.Module):
         tgt_w = torch.exp(target_w) * anchor_w
         tgt_h = torch.exp(target_h) * anchor_h
         box_loss = torch.tensor(0.0, device=preds.device)
+        iou_target = torch.zeros_like(target_conf)
         if obj_mask.sum() > 0:
             pred_box = torch.stack([pred_cx[obj_mask], pred_cy[obj_mask], pred_w[obj_mask], pred_h[obj_mask]], dim=1)
             tgt_box = torch.stack([tgt_cx[obj_mask], tgt_cy[obj_mask], tgt_w[obj_mask], tgt_h[obj_mask]], dim=1)
             box_loss = self.ciou_loss(pred_box, tgt_box)
-        obj_loss = self.bce(pred_conf[obj_mask], target_conf[obj_mask]) if obj_mask.sum() > 0 else torch.tensor(0.0, device=preds.device)
+            iou_target[obj_mask] = self._bbox_iou_xywh(pred_box, tgt_box).detach().clamp(0.0, 1.0)
+        obj_loss = self.bce(pred_conf[obj_mask], iou_target[obj_mask]) if obj_mask.sum() > 0 else torch.tensor(0.0, device=preds.device)
         noobj_loss = (
-            self.bce(pred_conf[noobj_mask], target_conf[noobj_mask])
+            self.bce(pred_conf[noobj_mask], iou_target[noobj_mask])
             if noobj_mask.sum() > 0
             else torch.tensor(0.0, device=preds.device)
         )
         conf_loss = obj_loss + 0.2 * noobj_loss
         cls_loss = torch.tensor(0.0, device=preds.device)
         if obj_mask.sum() > 0:
-            cls_loss = self.bce(pred_cls[obj_mask], target_cls[obj_mask])
+            if self.label_smoothing > 0:
+                cls_t = target_cls[obj_mask] * (1.0 - self.label_smoothing) + 0.5 * self.label_smoothing
+            else:
+                cls_t = target_cls[obj_mask]
+            cls_loss = self.bce(pred_cls[obj_mask], cls_t)
         total_loss = self.box_weight * box_loss + self.obj_weight * conf_loss + self.cls_weight * cls_loss
         return total_loss, box_loss, conf_loss, cls_loss
 

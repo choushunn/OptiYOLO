@@ -177,3 +177,20 @@ outputs/teacher_detector/
 - 若 `Precision` 高而 `Recall` 低：漏检偏多。可尝试降低阈值并增强数据。
 
 ---
+
+## 11. TensorBoard 可视化
+
+安装 `tensorboardX` 后，训练过程会自动写入 TensorBoard 日志目录。  
+默认日志位置在每次运行目录下的 `logs/tensorboard/`。
+
+启动可视化服务：
+
+```bash
+tensorboard --logdir outputs/teacher_detector
+```
+
+如需指定端口：
+
+```bash
+tensorboard --logdir outputs/teacher_detector --port 6006
+```
